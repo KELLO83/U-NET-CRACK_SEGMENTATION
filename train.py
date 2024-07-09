@@ -73,9 +73,7 @@ def train(opt, model, device):
     train_loader = DataLoader(train_data, batch_size=opt.batch_size, num_workers=8, shuffle=True, pin_memory=True)
     test_loader = DataLoader(test_data, batch_size=opt.batch_size, num_workers=8, drop_last=True, pin_memory=True)
     
-    # di,dm = train_data.__getitem__(0)
-    # print(di.shape)
-    # print(dm.shape)
+
     # Training
     for epoch in range(start_epoch, opt.epochs):
         model.train()
@@ -87,7 +85,8 @@ def train(opt, model, device):
         progress_bar = tqdm(train_loader, total=len(train_loader))
         for image, target in progress_bar:
             image, target = image.to(device), target.to(device)
-
+            print(image.shape)
+            print(target.shape)
             with torch.cuda.amp.autocast(enabled=opt.amp):
                 output = model(image)
                 loss = criterion(output, target)

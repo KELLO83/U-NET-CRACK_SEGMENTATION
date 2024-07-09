@@ -73,7 +73,7 @@ def mask_to_image(mask: np.ndarray):
 def parse_opt():
     parser = argparse.ArgumentParser(description="Crack Segmentation inference arguments")
     parser.add_argument("--weights", default="./weights/best.pt", help="Path to weight file (default: best.pt)")
-    parser.add_argument("--input", type=str, default="assets/pad_image.jpg", help="Path to input image")
+    parser.add_argument("--input", type=str, default="assets/CFD_019_image.jpg", help="Path to input image")
     parser.add_argument("--output", default="output.jpg", help="Path to save mask image")
     parser.add_argument("--view", action="store_true", help="Visualize image and mask",default='True')
     parser.add_argument("--no-save", action="store_true", help="Do not save the output masks")
@@ -96,7 +96,7 @@ def main(opt):
 
     # Load & Inference
     image = Image.open(opt.input)
-    label = Image.open("assets/pd_mask.png")
+    label = Image.open("assets/CFD_019_gt.jpg")
     
     output = predict(model=model, image=image, device=device, conf_thresh=opt.conf_thresh)
 
