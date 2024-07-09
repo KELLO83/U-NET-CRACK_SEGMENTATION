@@ -5,7 +5,8 @@ from PIL import Image
 from torch.utils import data
 
 from crackseg.utils.general import TrainTransforms
-
+from image_pad import PadToSquare
+import pdb
 
 class RoadCrack(data.Dataset):
     def __init__(
@@ -13,16 +14,20 @@ class RoadCrack(data.Dataset):
             root: str,
             image_size: int = 448,
             transforms: TrainTransforms = TrainTransforms,
-            mask_suffix: str = "_mask"
+            mask_suffix: str = "_mask",
+            train:bool = True
     ) -> None:
         self.root = root
         self.image_size = image_size
         self.mask_suffix = mask_suffix
-        self.filenames = [os.path.splitext(filename)[0] for filename in os.listdir(os.path.join(self.root, "images"))]
+        self.filenames = [os.path.splitext(filename)[0] for filename in os.listdir(os.path.join(self.root)) if filename.endswith(".jpg")]
+        
         if not self.filenames:
             raise FileNotFoundError(f"Files not found in {root}")
         self.transforms = transforms()
-
+        self.padding = PadToSquare()
+        self.is_train = train 
+        
     def __len__(self) -> int:
         return len(self.filenames)
 
@@ -30,21 +35,28 @@ class RoadCrack(data.Dataset):
         filename = self.filenames[idx]
 
         # image path
-        image_path = os.path.join(self.root, f"images{os.sep}{filename}.jpg")
-        mask_path = os.path.join(self.root, f"masks{os.sep}{filename + self.mask_suffix}.jpg")
+        if self.is_train:
+            image_path = os.path.join(self.root, f"{filename}.jpg")
+            mask_path = os.path.join(self.root, f"{filename}.png")
+        else :
+            image_path = os.path.join(self.root,f"{filename}.jpg")
+            mask_path = os.path.join(self.root,f"{filename}_mask.png")
 
         # image load
         image = Image.open(image_path)
         mask = Image.open(mask_path)
+        if image is None or mask is None:
+            raise FileNotFoundError("Exception FIle not Founded")
+        # mask = to_binary(mask)
+        image , mask = self.padding(image,mask)
 
-        mask = to_binary(mask)
-
+        
         assert image.size == mask.size, f"`image`: {image.size} and `mask`: {mask.size} are not the same"
 
         # TODO: letterbox or some other resizing methods should be used if image is not square.
         # resize input
-        image = image.resize((self.image_size, self.image_size))
-        mask = mask.resize((self.image_size, self.image_size))
+        # image = image.resize((self.image_size, self.image_size))
+        # mask = mask.resize((self.image_size, self.image_size))
 
         # transform
         if self.transforms is not None:

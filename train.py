@@ -1,7 +1,7 @@
 import os
 import logging
 import argparse
-from tqdm import tqdm
+from tqdm.auto import tqdm
 from copy import deepcopy
 
 import torch
@@ -12,6 +12,7 @@ from crackseg.models import UNet
 from crackseg.utils.dataset import RoadCrack
 from crackseg.utils.general import random_seed
 from crackseg.utils.losses import CrossEntropyLoss, DiceCELoss, DiceLoss, FocalLoss
+import cv2
 
 
 def strip_optimizers(f: str) -> None:
@@ -39,10 +40,12 @@ def train(opt, model, device):
         model.load_state_dict(ckpt["model"].float().state_dict())
         logging.info(f"Model ckpt loaded from {opt.weights}")
     model.to(device)
+    
 
     # Optimizers & LR Scheduler & Mixed Precision & Loss
-    optimizer = torch.optim.RMSprop(model.parameters(), lr=opt.lr, weight_decay=1e-8, momentum=0.9, foreach=True)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", patience=5)
+    optimizer = torch.optim.Adam(model.parameters(), lr=opt.lr, weight_decay=1e-8,foreach=True)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", patience=5,verbose=True,min_lr=1e-8
+                                                           ,factor=0.1)
     grad_scaler = torch.cuda.amp.GradScaler(enabled=opt.amp)
     criterion = DiceLoss()
 
@@ -58,20 +61,29 @@ def train(opt, model, device):
                     f"{opt.weights} has been trained for {start_epoch} epochs. Fine-tuning for {opt.epochs} epochs"
                 )
         del ckpt
-
+    
+    print(f"opt.data {opt.data}")
+    
+    
     # Dataset
-    train_data = RoadCrack(root=f"{opt.data}/train", image_size=opt.image_size, mask_suffix="")
-    test_data = RoadCrack(root=f"{opt.data}/test", image_size=opt.image_size, mask_suffix="")
+    train_data = RoadCrack(root=f'data/train', image_size=opt.image_size, mask_suffix="")
+    test_data = RoadCrack(root=f'data/test', image_size=opt.image_size, mask_suffix="",train=False)
 
     # DataLoader
     train_loader = DataLoader(train_data, batch_size=opt.batch_size, num_workers=8, shuffle=True, pin_memory=True)
     test_loader = DataLoader(test_data, batch_size=opt.batch_size, num_workers=8, drop_last=True, pin_memory=True)
-
+    
+    # di,dm = train_data.__getitem__(0)
+    # print(di.shape)
+    # print(dm.shape)
     # Training
     for epoch in range(start_epoch, opt.epochs):
         model.train()
         epoch_loss = 0
         logging.info(("\n" + "%12s" * 3) % ("Epoch", "GPU Mem", "Loss"))
+        
+        SAVE_DIR = './weights'
+        
         progress_bar = tqdm(train_loader, total=len(train_loader))
         for image, target in progress_bar:
             image, target = image.to(device), target.to(device)
@@ -80,7 +92,7 @@ def train(opt, model, device):
                 output = model(image)
                 loss = criterion(output, target)
 
-            optimizer.zero_grad(set_to_none=True)
+            optimizer.zero_grad()
             grad_scaler.scale(loss).backward()
             grad_scaler.step(optimizer)
             grad_scaler.update()
@@ -91,7 +103,7 @@ def train(opt, model, device):
 
         dice_score, dice_loss = validate(model, test_loader, device)
         logging.info(f"VALIDATION: Dice Score: {dice_score:.4f}, Dice Loss: {dice_loss:.4f}")
-        scheduler.step(epoch)
+        scheduler.step(dice_loss)
         ckpt = {
             "epoch": epoch,
             "best_score": best_score,
@@ -108,8 +120,9 @@ def train(opt, model, device):
         strip_optimizers(f)
 
 
+
 @torch.inference_mode()
-def validate(model, data_loader, device, conf_threshold=0.5):
+def validate(model, data_loader, device ,conf_threshold=0.5):
     model.eval()
     dice_score = 0
     criterion = DiceLoss()
@@ -129,10 +142,10 @@ def validate(model, data_loader, device, conf_threshold=0.5):
 def parse_opt():
     parser = argparse.ArgumentParser(description="Crack Segmentation training arguments")
     parser.add_argument("--data", type=str, default="./data", help="Path to root folder of data")
-    parser.add_argument("--image_size", type=int, default=448, help="Input image size, default: 448")
+    parser.add_argument("--image_size", type=int, default=640, help="Input image size, default: 6") # 640 수정
     parser.add_argument("--save-dir", type=str, default="weights", help="Directory to save weights")
-    parser.add_argument("--epochs", type=int, default=10, help="Number of epochs, default: 5")
-    parser.add_argument("--batch-size", type=int, default=16, help="Batch size, default: 12")
+    parser.add_argument("--epochs", type=int, default=100, help="Number of epochs, default: 50")
+    parser.add_argument("--batch-size", type=int, default=8, help="Batch size, default: 12")
     parser.add_argument("--lr", type=float, default=1e-5, help="Learning rate, default: 1e-5")
     parser.add_argument("--weights", type=str, default="", help="Pretrained model, default: None")
     parser.add_argument("--amp", action="store_true", help="Use mixed precision")
