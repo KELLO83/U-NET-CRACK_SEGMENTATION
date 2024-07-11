@@ -1,17 +1,24 @@
-import torch
-import torch.nn as nn
+from crackseg.utils.dataset import CustomDataset
+from torch.utils.data import DataLoader
+from tqdm.auto import tqdm
 
-# Define the ConvTranspose2d layer
-conv_transpose = nn.ConvTranspose2d(in_channels=1, out_channels=1, kernel_size=3, stride=2, padding=1, output_padding=1)
 
-# Example input tensor of shape (batch_size, channels, height, width)
-input_tensor = torch.randn(size=(1,6,6))
 
-# Apply the transposed convolution
-output_tensor = conv_transpose(input_tensor)
-
-print("Input Tensor Shape:", input_tensor.shape) # 1 6 6
-print("Output Tensor:", output_tensor)
-print("Output Tensor Shape:", output_tensor.shape) # 1 12 12
-
-print("convTranspose2d Weight" , conv_transpose.weight) # 3 3
+if __name__ == "__main__":
+    image_path = 'data/CrackLS315_IMAGE'
+    mask_path = 'data/CrackLS315_MASK'
+    image_type = 'jpg'
+    train_data = CustomDataset(image_path , mask_path,image_type,is_resize=True)
+    train_DataLoader = DataLoader(train_data , batch_size=1)
+    
+    
+    for i in tqdm(train_DataLoader,total=len(train_DataLoader)):
+        batch = i
+        print(batch[0].shape)
+        print(batch[1].shape)
+        
+        
+    
+    
+    
+    

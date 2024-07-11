@@ -80,7 +80,6 @@ def train(opt, model, device):
         epoch_loss = 0
         logging.info(("\n" + "%12s" * 3) % ("Epoch", "GPU Mem", "Loss"))
         
-        SAVE_DIR = './weights'
         
         progress_bar = tqdm(train_loader, total=len(train_loader))
         for image, target in progress_bar:
