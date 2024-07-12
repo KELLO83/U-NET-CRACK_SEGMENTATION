@@ -58,7 +58,8 @@ def train(opt, model, device):
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", patience=5,verbose=True,min_lr=1e-8
                                                            ,factor=0.1)
     grad_scaler = torch.cuda.amp.GradScaler(enabled=opt.amp)
-    criterion = CustomDice_Loss()
+    criterion = torch.nn.BCEWithLogitsLoss()
+    #criterion = CustomDice_Loss()
     average_precision = torchmetrics.AveragePrecision(task='binary')
     writer = SummaryWriter('./log_dir')
     # Resume
@@ -120,7 +121,9 @@ def train(opt, model, device):
             target = target.to(torch.int64)
             with torch.cuda.amp.autocast(enabled=opt.amp):
                 output = model(image)
-                loss = criterion(output, target)
+                
+                target_float64 = target.to(torch.float64)
+                loss = criterion(output, target_float64)
                 
                 #target_float64 = target.to(torch.int64)
                 #ap_result = average_precision(output[:,1,:,:],target_float64)
