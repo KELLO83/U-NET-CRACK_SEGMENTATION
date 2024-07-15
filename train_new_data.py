@@ -11,21 +11,45 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 from crackseg.models import UNet
-from crackseg.utils.dataset import CustomDataset
+from crackseg.utils.dataset import CustomDataset,RoadCrack
 from crackseg.utils.general import random_seed
 from crackseg.utils.losses import CrossEntropyLoss, DiceCELoss, DiceLoss, FocalLoss
-from custom_dice_loss import CustomDice_Loss
-
-
-from sklearn.model_selection import train_test_split
+from custom_dice_loss import CustomDice_Loss,BCEDiceLoss
 
 import torchmetrics
 import os
+import numpy as np
+import cv2
+import pdb
+import torchinfo
 
 os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 os.environ["TORCH_USE_CUDA_DSA"] = '1'
 
+
+
+def visualize_batch_cv2(images, masks):
+    batch_size = images.size(0)
+    for i in range(batch_size): # [4,3,512,512] , [4,1,512,512]
+        image = images[i].permute(1, 2, 0).cpu().numpy()  # [C, H, W] -> [H, W, C]
+        image = (image * 255).astype(np.uint8)  # 이미지 값을 0-255 범위로 변환
+        mask = masks[i].squeeze(0).cpu().numpy()  # [1, H, W] -> [H, W]
+        mask = (mask * 255).astype(np.uint8)  # 마스크 값을 0-255 범위로 변환
+        
+        # OpenCV를 사용하여 이미지와 마스크 표시
+        image_named = "image"
+        mask_named = "mask"
+        cv2.namedWindow(image_named)
+        cv2.namedWindow(mask_named)
+        cv2.moveWindow(image_named,1000,1000)
+        cv2.moveWindow(mask_named,1500,1000)        
+        cv2.imshow(image_named, image)
+        cv2.imshow(mask_named, mask)
+        cv2.waitKey(1000)  # 키 입력을 대기 (무한 대기)
+        cv2.destroyAllWindows()
+    
+        
 def strip_optimizers(f: str) -> None:
     """Strip optimizer from 'f' to finalize training"""
     x = torch.load(f, map_location="cpu")
@@ -59,14 +83,13 @@ def train(opt, model, device):
                                                            ,factor=0.1)
     grad_scaler = torch.cuda.amp.GradScaler(enabled=opt.amp)
     criterion = torch.nn.BCEWithLogitsLoss()
-    #criterion = CustomDice_Loss()
-    average_precision = torchmetrics.AveragePrecision(task='binary')
     writer = SummaryWriter('./log_dir')
+    
     # Resume
     if pretrained:
         if ckpt["optimizer"] is not None:
             start_epoch = ckpt["epoch"] + 1
-            best_score = ckpt["best_score"]
+            best_loss = ckpt["best_loss"]
             optimizer.load_state_dict(ckpt["optimizer"])
             logging.info(f"Optimizer loaded from {opt.weights}")
             if start_epoch < opt.epochs:
@@ -78,37 +101,24 @@ def train(opt, model, device):
     print(f"opt.data {opt.data}")
     
     
-
-    # Dataset
-    image_path = 'data/CrackLS315_IMAGE'
-    mask_path = 'data/CrackLS315_MASK'
-    image_type = 'jpg'
+    #dataset
+    image_path = 'data/CRKWH100_IMAGE'
+    mask_path = 'data/CRKWH100_MASK'
+    image_type = 'png'
     
-    test_image__path = 'data/CrackLS315_IMAGE/val'
-    test_mask_path = 'data/CrackLS315_MASK/val'
+    test_image__path = 'data/CRKWH100_IMAGE/val'
+    test_mask_path = 'data/CRKWH100_MASK/val'
     
-    train_data = CustomDataset(image_path , mask_path , image_type , is_resize=True)
-    test_data = CustomDataset(test_image__path,test_mask_path,image_type,is_resize=True)
+    train_data = CustomDataset(image_path , mask_path , image_type , is_resize=False)
+    test_data = CustomDataset(test_image__path,test_mask_path,image_type,is_resize=False)
     
-    it = iter(train_data)
-    it_one = it.__next__()
-    image_test = it_one[0].detach().cpu().numpy().transpose(1,2,0)
-    mask_test = it_one[1].detach().cpu().numpy().transpose(1,2,0)
-    # DataLoader
-    train_loader = DataLoader(train_data, batch_size=opt.batch_size, num_workers=8, shuffle=True, pin_memory=True)
-    test_Loader = DataLoader(test_data,batch_size=1,num_workers=8,shuffle=False, pin_memory=True)
-
-    for i in train_loader:
-        batch = i
-        print(batch[0].shape)
-        print(batch[1].shape)
-        
-    for i in test_Loader:
-        batch = i
-        print(batch[0].shape)
-        print(batch[1].shape)
-        
-        
+    #DataLoader
+    train_loader = DataLoader(train_data, batch_size=opt.batch_size, num_workers=8, shuffle=True, pin_memory=True) # batch_size = opt.batch_size
+    test_loader = DataLoader(test_data,batch_size=1,num_workers=8,shuffle=False, pin_memory=True)
+    
+    best_loss = 100
+    scalar_count = 0
+    val_count = 0
     # Training
     for epoch in range(start_epoch, opt.epochs):
         model.train()
@@ -118,74 +128,69 @@ def train(opt, model, device):
         progress_bar = tqdm(train_loader, total=len(train_loader))
         for image, target in progress_bar:
             image, target = image.to(device), target.to(device)
-            target = target.to(torch.int64)
             with torch.cuda.amp.autocast(enabled=opt.amp):
                 output = model(image)
+                loss = criterion(output,target)
+                writer.add_scalar('loss/train',loss.item(),scalar_count)
+                scalar_count += 1
                 
-                target_float64 = target.to(torch.float64)
-                loss = criterion(output, target_float64)
-                
-                #target_float64 = target.to(torch.int64)
-                #ap_result = average_precision(output[:,1,:,:],target_float64)
-
             optimizer.zero_grad()
             grad_scaler.scale(loss).backward()
-            grad_scaler.step(optimizer)
+            grad_scaler.step(optimizer) 
             grad_scaler.update()
 
             epoch_loss += loss.item()
             mem = f"{torch.cuda.memory_reserved() / 1E9 if torch.cuda.is_available() else 0:.3g}G"  # (GB)
             progress_bar.set_description(("%12s" * 2 + "%12.4g") % (f"{epoch + 1}/{opt.epochs}", mem, loss))
 
-        dice_score, dice_loss = validate(model, test_Loader, device)
-        logging.info(f"VALIDATION: Dice Score: {dice_score:.4f}, Dice Loss: {dice_loss:.4f}")
-        scheduler.step(dice_loss)
-
+        loss = validate(model, test_loader, device)
+        logging.info(f"VALIDATION: Loss: {loss:.4f}")
+        scheduler.step(loss)
+        writer.add_scalar("loss/val",loss.item(),val_count)
+        val_count += 1
         ckpt = {
             "epoch": epoch,
-            "best_score": best_score,
+            "best_loss": loss,
             "model": deepcopy(model).half(),
             "optimizer": optimizer.state_dict(),
         }
+        
         torch.save(ckpt, last)
-        if best_score < dice_score:
-            best_score = max(best_score, dice_score)
+        if best_loss > loss:
+            best_loss = min(best_loss, loss.item())
             torch.save(ckpt, best)
-            
-        writer.add_scalar('loss/train',loss.item(),epoch)
+        
+
         
     # Strip optimizers & save weights
     for f in best, last:
         strip_optimizers(f)
+    
+    writer.close()
 
 
 
 @torch.inference_mode()
-def validate(model, data_loader, device ,conf_threshold=0.5):
+def validate(model, data_loader, device):
     model.eval()
-    dice_score = 0
-    criterion = DiceLoss()
+    criterion = torch.nn.BCEWithLogitsLoss()
     for image, target in tqdm(data_loader, total=len(data_loader)):
         image, target = image.to(device), target.to(device)
-        target  = target / 255.0
         with torch.no_grad():
             output = model(image)
-            if model.out_channels == 1:
-                output = F.sigmoid(output) > conf_threshold
-            dice_loss = criterion(output, target)
-            dice_score += 1 - dice_loss
+            loss = criterion(output, target)
     model.train()
-    return dice_score / len(data_loader), dice_loss
+    return loss
 
 
 def parse_opt():
     parser = argparse.ArgumentParser(description="Crack Segmentation training arguments")
     parser.add_argument("--data", type=str, default="./data", help="Path to root folder of data")
     parser.add_argument("--image_size", type=int, default=512, help="Input image size, default: 6") # 512 수정
-    parser.add_argument("--save-dir", type=str, default="weights/CrackLS315", help="Directory to save weights")
-    parser.add_argument("--epochs", type=int, default=100, help="Number of epochs, default: 50")
+    parser.add_argument("--save-dir", type=str, default="weights/CRKWH100", help="Directory to save weights")
+    parser.add_argument("--epochs", type=int, default=50, help="Number of epochs, default: 50")
     parser.add_argument("--batch-size", type=int, default=4, help="Batch size, default: 12")
-    parser.add_argument("--lr", type=float, default=1e-7, help="Learning rate, default: 1e-5")
+    parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate, default: 1e-5")
     parser.add_argument("--weights", type=str, default="", help="Pretrained model, default: None")
     parser.add_argument("--amp", action="store_true", help="Use mixed precision")
     parser.add_argument("--num-classes", type=int, default=1, help="Number of classes")
@@ -198,7 +203,7 @@ def main(opt):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logging.info(f"Device: {device}")
     model = UNet(in_channels=3, out_channels=opt.num_classes)
-
+    torchinfo.summary(model,input_size=(1,3,512,512))
     logging.info(
         f"Network:\n"
         f"\t{model.in_channels} input channels\n"

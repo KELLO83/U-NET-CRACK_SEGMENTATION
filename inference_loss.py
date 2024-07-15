@@ -20,64 +20,70 @@ from torchmetrics.classification import BinaryPrecision , BinaryRecall
 from torchmetrics.classification import BinaryJaccardIndex
 import torchmetrics
 
+from sklearn.metrics import average_precision_score , precision_recall_curve
+
+def get_ap(output,target):
+    output = torch.sigmoid(output)
+    
+    output = output.contiguous().flatten().detach().cpu().numpy()
+    target = target.contiguous().flatten().detach().cpu().numpy()
+    
+    ap_score = average_precision_score(target , output)
+
+    print("Ap score : {:.5f}%".format(ap_score*100))
+
+
+
+def get_metrics(output,target,th=0.01):
+    output = torch.sigmoid(output)
+    
+    output = (output > th).float()
+    
+    TP = (output * target).sum().item()
+    FP = (output * (1-target)).sum().item()
+    FN = ((1-output) * target).sum().item()
+    
+    precision = TP / (TP + FP + 1e-7)
+    recall = TP / (TP + FN + 1e-7)
+    
+    f1_score = 2 * (precision * recall) / (precision + recall + 1e-7)
+    
+    print("정밀도 : {:.5f}% 재현율 : {:.5f}% f1_score : {:.5f}%".format(precision*100,recall*100,f1_score*100))
+
 @torch.inference_mode
 def evaulte(model , data_loader,device):
-    metric = BinaryF1Score().to(device)
-    precision = BinaryPrecision().to(device)
-    recall = BinaryRecall().to(device)
-    iou_metric = BinaryJaccardIndex().to(device)
-    average_precision = torchmetrics.AveragePrecision(task='binary')
-    ap_result = []
     model.eval()
-    dice_score = 0
-    criterion = DiceLoss()
+    criterion = torch.nn.BCEWithLogitsLoss()
     for image , target  in tqdm(data_loader , total=len(data_loader)):
         image , target = image.to(device) , target.to(device)
-        target = target / 255.0 # CRACK 500 DATASET 사용시 삭제 필요 
         with torch.no_grad():
             output = model(image)
-            if model.out_channels == 1:
-                output = F.sigmoid(output) > 0.5
-            dice_loss = criterion(output,target)
-            dice_score += 1 - dice_loss
-            metric.update(output[:,0,:,:],target)
-            precision.update(output[:,0,:,:],target)
-            recall.update(output[:,0,:,:],target)
-            iou_metric.update(output[:,0,:,:],target)   
+            loss = criterion(output,target)
             
-            target_float64 = target.to(torch.int64)
-            ap_ = average_precision(output[:,0,:,:],target_float64)     
-            ap_result.append(ap_)
-            
-    f1_score = metric.compute()
-    precision_result = precision.compute()
-    recall_result = recall.compute()
-    iou_score_result = iou_metric.compute()
-    ap_average = sum(ap_result) / len(ap_result)
     model.train()
     
-    return dice_score / len(data_loader) , dice_loss , f1_score , precision_result , recall_result , iou_score_result , ap_average
-
+    return output , loss
 
 @torch.inference_mode
-def image_segmentation_runnung(model , input , device):
+def image_segmentation_runnung(model , input , device,th):
     model.eval()
-    dice_score = 0
-    criterion = DiceLoss()
+    criterion = torch.nn.BCEWithLogitsLoss()
     with torch.no_grad():
         image,mask = input[0].to(device) , input[1].to(device)
-        mask = mask / 255.0 # CRACK 500 아닐시 사용
         output = model(image)
-        dice_loss = criterion(output , mask)
+        loss = criterion(output , mask)
+        get_ap(output,mask)
+        get_metrics(output,mask,th)
         
-    return output , dice_loss
+    return output , loss
+
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logging.info(f"Device: {device}")
     model = UNet(in_channels=3, out_channels=1)
-    weith_path = 'weights/CrackLS315/best.pt'
+    weith_path = 'weights/CRKWH100/last.pt'
     ckpt = torch.load(weith_path,map_location=device)
     model.load_state_dict(ckpt['model'].float().state_dict())
     model = model.to(device)
@@ -88,9 +94,9 @@ if __name__ == "__main__":
         f"\t{model.out_channels} output channels (number of classes)"
     )
     
-    image_path = 'data/CrackLS315_IMAGE/test'
-    mask_path = 'data/CrackLS315_MASK/test'
-    test_dataset = CustomDataset(image_path,mask_path,'jpg',is_resize=True)
+    image_path = 'data/CRKWH100_IMAGE/val'
+    mask_path = 'data/CRKWH100_MASK/val'
+    test_dataset = CustomDataset(image_path,mask_path,'png',is_resize=True)
     test_loader = DataLoader(test_dataset,batch_size=1,num_workers=8,shuffle=False,pin_memory=True)
     
     for index , i in enumerate(test_loader):
@@ -98,46 +104,44 @@ if __name__ == "__main__":
         print(batch[0].shape)
         print(batch[1].shape)
         if index==2:
-            batch = i
-            image__ = batch[0]
-            label__ = batch[1]
+            t = i
+            image__ = t[0]
+            label__ = t[1]
             break
     
-    image = image__.squeeze().permute(1,2,0)
-    image_np = image.detach().cpu().numpy()
+    out , loss = evaulte(model,test_loader,device)
+    print("Test Dataset loss :{:.5f}".format(loss))
     
-    label_np = (label__ * 255).permute(1,2,0)
-    label_np = label_np.detach().cpu().numpy()
-    if label_np.ndim == 3 and label_np.shape[2] == 1:
-        label_np = label_np[:,:,0].astype(np.uint8)
-    
-    image_np = np.flip(image_np , axis= -1)
-    #label_np = np.flip(label_np  , axis= -1)
-    
-    ds , dl , score , pre , rec , iou , ap_res = evaulte(model,test_loader,device)
-    print("============== Total Test set\nDice socre : {:.5f}\n Dice loss : {:.5f}\n F1 Score : {:.5f}\n Precision : {:.5f}\n Recall : {:.5f}\n IoU : {:.5f}\nAP : {:.5f}\n====================".
-          format(ds,dl,score*100,pre*100,rec*100,iou*100,ap_res))
-    
-    for i in test_loader:
-        batch = i
-        break
+    target =  image__.squeeze(0).permute(1,2,0).detach().cpu().numpy()
+    mask = label__.squeeze(0).permute(1,2,0).detach().cpu().numpy()
+    target = (target * 255).astype(np.uint8)
+    mask = (mask * 255).astype(np.uint8)
+
+    threshold = 1e-1
     
     example = [image__ , label__]
-    out , out_loss= image_segmentation_runnung(model , example , device)
-    out = out.squeeze()
-    result_np = out.detach().cpu().numpy()
-    # print(out)
-    # print(out.shape)
-    print("Dice Score : {:.5f} Dice loss : {:.5f}".format(1-out_loss,out_loss))
-    label_np = label_np * 255
-    target = np.clip(result_np[1] * (-1) * 255,0,255)
-    #cv2.imshow("Channel 1",result_np[0])
-    cv2.imshow("CHannel 2",target)
+    out_image , out_loss= image_segmentation_runnung(model , example , device , threshold)
+    out_image = torch.sigmoid(out_image)
+    out_image = (out_image > threshold).float() * 255
+    out_image = out_image.to(torch.uint8)
+    out_image = out_image.squeeze(0).permute(1,2,0).detach().cpu().numpy()
 
-    cv2.imshow("orgin image",image_np)
-    cv2.imshow("label_np",label_np)
-    cv2.waitKey(0)
+    
+    win_image_name = 'image'
+    mask_image_name = 'mask'
+    out_image_name = 'out'
+    
+    cv2.namedWindow(win_image_name)
+    cv2.namedWindow(mask_image_name)
+    cv2.namedWindow(out_image_name)
+    
+    cv2.moveWindow(win_image_name,1200,1200)
+    cv2.moveWindow(mask_image_name,1700,1200)
+    cv2.moveWindow(out_image_name , 2200 , 1200)
+    
+    cv2.imshow(win_image_name,target)
+    cv2.imshow(mask_image_name,mask)
+    cv2.imshow(out_image_name,out_image)
+    
+    cv2.waitKey()
     cv2.destroyAllWindows()
-    
-        
-    

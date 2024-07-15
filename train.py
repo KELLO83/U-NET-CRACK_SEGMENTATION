@@ -14,6 +14,8 @@ from crackseg.utils.general import random_seed
 from crackseg.utils.losses import CrossEntropyLoss, DiceCELoss, DiceLoss, FocalLoss
 import cv2
 
+# import os
+# os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 
 def strip_optimizers(f: str) -> None:
     """Strip optimizer from 'f' to finalize training"""
@@ -48,7 +50,7 @@ def train(opt, model, device):
                                                            ,factor=0.1)
     grad_scaler = torch.cuda.amp.GradScaler(enabled=opt.amp)
     criterion = DiceLoss()
-
+    #criterion = torch.nn.BCEWithLogitsLoss()
     # Resume
     if pretrained:
         if ckpt["optimizer"] is not None:
@@ -73,6 +75,35 @@ def train(opt, model, device):
     train_loader = DataLoader(train_data, batch_size=opt.batch_size, num_workers=8, shuffle=True, pin_memory=True)
     test_loader = DataLoader(test_data, batch_size=opt.batch_size, num_workers=8, drop_last=True, pin_memory=True)
     
+    # import numpy as np
+    # for i in train_loader:
+    #     batch = i
+    #     image = i[0] # tensor 1 3 512 512
+    #     mask = i[1] # tensor 1 1 512 512
+    #     print(batch[0].shape)
+    #     print(batch[1].shape)
+        
+    #     target = image.squeeze(0).permute(1,2,0).detach().cpu().numpy() # 3 512 512
+    #     mask = mask.permute(1,2,0).detach().cpu().numpy() 
+        
+    #     target = target * 255
+    #     target = target.astype(np.uint8)
+        
+    #     mask = mask * 255
+    #     mask = mask.astype(np.uint8)
+        
+    #     win_image_name = 'image'
+    #     mask_image_name = 'mask'
+        
+    #     cv2.namedWindow(win_image_name)
+    #     cv2.namedWindow(mask_image_name)
+    #     cv2.moveWindow(win_image_name,1200,1200)
+    #     cv2.moveWindow(mask_image_name,500,500)
+        
+    #     cv2.imshow(win_image_name,target)
+    #     cv2.imshow(mask_image_name,mask)
+    #     cv2.waitKey(1000)
+        #cv2.destroyAllWindows()
 
     # Training
     for epoch in range(start_epoch, opt.epochs):
@@ -84,8 +115,6 @@ def train(opt, model, device):
         progress_bar = tqdm(train_loader, total=len(train_loader))
         for image, target in progress_bar:
             image, target = image.to(device), target.to(device)
-            print(image.shape)
-            print(target.shape)
             with torch.cuda.amp.autocast(enabled=opt.amp):
                 output = model(image)
                 loss = criterion(output, target)
@@ -102,12 +131,14 @@ def train(opt, model, device):
         dice_score, dice_loss = validate(model, test_loader, device)
         logging.info(f"VALIDATION: Dice Score: {dice_score:.4f}, Dice Loss: {dice_loss:.4f}")
         scheduler.step(dice_loss)
+        
         ckpt = {
             "epoch": epoch,
             "best_score": best_score,
             "model": deepcopy(model).half(),
             "optimizer": optimizer.state_dict(),
         }
+        
         torch.save(ckpt, last)
         if best_score < dice_score:
             best_score = max(best_score, dice_score)
@@ -139,12 +170,12 @@ def validate(model, data_loader, device ,conf_threshold=0.5):
 
 def parse_opt():
     parser = argparse.ArgumentParser(description="Crack Segmentation training arguments")
-    parser.add_argument("--data", type=str, default="./data", help="Path to root folder of data")
+    parser.add_argument("--data", type=str, default="./data/compare", help="Path to root folder of data")
     parser.add_argument("--image_size", type=int, default=640, help="Input image size, default: 6") # 640 수정
     parser.add_argument("--save-dir", type=str, default="weights", help="Directory to save weights")
     parser.add_argument("--epochs", type=int, default=100, help="Number of epochs, default: 50")
     parser.add_argument("--batch-size", type=int, default=8, help="Batch size, default: 12")
-    parser.add_argument("--lr", type=float, default=1e-5, help="Learning rate, default: 1e-5")
+    parser.add_argument("--lr", type=float, default=1e-2, help="Learning rate, default: 1e-5")
     parser.add_argument("--weights", type=str, default="", help="Pretrained model, default: None")
     parser.add_argument("--amp", action="store_true", help="Use mixed precision")
     parser.add_argument("--num-classes", type=int, default=2, help="Number of classes")

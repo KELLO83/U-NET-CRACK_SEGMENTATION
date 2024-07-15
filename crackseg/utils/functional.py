@@ -46,18 +46,19 @@ def dice_loss(
         reduction: str = "none",
         eps: float = 1e-5,
 ) -> torch.Tensor:
-    inputs = F.softmax(inputs, dim=1)
-    targets = F.one_hot(targets, inputs.shape[1]).permute(0, 3, 1, 2)
+    inputs_ = F.softmax(inputs, dim=1)
+    #targets_ = targets.unsqueeze(dim=1)
+    targets_ = F.one_hot(targets, inputs.shape[1]).permute(0, 3, 1, 2) # 단일 확률분포 사용시 사용 x
 
-    if inputs.shape != targets.shape:
+    if inputs_.shape != targets_.shape:
         raise AssertionError(f"Ground truth has different shape ({targets.shape}) from input ({inputs.shape})")
 
     # flatten prediction and label tensors
-    inputs = inputs.flatten()
-    targets = targets.flatten()
+    inputs_ = inputs_.flatten()
+    targets_ = targets_.flatten()
 
-    intersection = torch.sum(inputs * targets)
-    denominator = torch.sum(inputs) + torch.sum(targets)
+    intersection = torch.sum(inputs_ * targets_)
+    denominator = torch.sum(inputs_) + torch.sum(targets_)
 
     # calculate the dice loss
     dice_score = (2.0 * intersection + eps) / (denominator + eps)
@@ -65,7 +66,7 @@ def dice_loss(
 
     if weight is not None:
         assert weight.ndim == loss.ndim
-        assert len(weight) == len(inputs)
+        assert len(weight) == len(inputs_)
     loss = weight_reduce_loss(loss, weight, reduction=reduction)
 
     return loss

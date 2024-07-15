@@ -21,8 +21,22 @@ from image_pad import PadToSquare
 import pdb
 import natsort
 
-from torchvision import transforms as T
 
+from torchvision import transforms as T
+import random
+import torchvision.transforms.functional as TF
+
+class CustomHorizontalFlip:
+    def __call__(self, image, mask):
+        seed = random.randint(0, 2**32)
+        random.seed(seed)
+        if random.random() > 0.5:
+            image = TF.hflip(image)
+        random.seed(seed)
+        if random.random() > 0.5:
+            mask = TF.hflip(mask)
+        return image, mask
+    
 class CustomDataset(data.Dataset):
     """CRKWH1000 CRACKLS315 STONE331_"""
     def __init__(
@@ -31,7 +45,7 @@ class CustomDataset(data.Dataset):
             mask_dir : str,
             image_type : str,
             image_size: int = 512,
-            transforms=None,
+            transforms= None,
             is_resize : bool = False,
     ) -> None:
         
@@ -44,25 +58,24 @@ class CustomDataset(data.Dataset):
         self.image_filenames = [os.path.splitext(filename)[0] for filename in os.listdir(os.path.join(self.image_dir)) if filename.endswith(f"{image_type}")]
         self.mask_filenames = [os.path.splitext(filename)[0] for filename in os.listdir(os.path.join(self.mask_dir)) if filename.endswith(".bmp")]
         
+        self.image_filenames = natsort.natsorted(self.image_filenames)
+        self.mask_filenames  =natsort.natsorted(self.mask_filenames)
+                
         if not self.image_filenames:
             raise FileNotFoundError(f"Files not found in {image_dir}")
         
         if not self.mask_filenames:
             raise FileNotFoundError(f"Files not found in {mask_dir}")
         
+        self.aug = CustomHorizontalFlip()
+        
         self.transforms = T.Compose([
             T.ToTensor(),
         ])
         
-        if self.is_resize:
-            self.Tc = T.Compose([
-                T.CenterCrop(512)
-            ])
-        else:
-            self.tc = None
 
         
-    def __len__(self) -> int:
+    def __len__(self) -> int: 
         return len(self.image_filenames)
 
     def __getitem__(self, idx):
@@ -76,29 +89,17 @@ class CustomDataset(data.Dataset):
         image = Image.open(image_path)
         mask = Image.open(mask_path)
         
-        x = np.array(image)
-        y = np.array(mask)
-        # cv2.imshow("image",x)
-        # cv2.imshow('mask',y)
-        # cv2.waitKey(500)
-        # cv2.destroyAllWindows()
-        
         if image is None or mask is None:
             raise FileNotFoundError("Exception FIle not Founded")
 
-
-        
         assert image.size == mask.size, f"`image`: {image.size} and `mask`: {mask.size} are not the same"
 
-        # transform
+        image , mask = self.aug(image , mask)
+        
         if self.transforms is not None:
-            image  =  self.transforms(x)
-            mask = self.transforms(y)
+            image = self.transforms(image)
+            mask = self.transforms(mask)
 
-        if self.is_resize:
-            image = self.Tc(image)
-            mask = self.Tc(mask)
-            
         return image, mask
 
 
