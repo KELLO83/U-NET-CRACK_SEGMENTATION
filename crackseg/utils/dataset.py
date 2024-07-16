@@ -25,6 +25,7 @@ import natsort
 from torchvision import transforms as T
 import random
 import torchvision.transforms.functional as TF
+from torchvision import transforms
 
 class CustomHorizontalFlip:
     def __call__(self, image, mask):
@@ -36,6 +37,26 @@ class CustomHorizontalFlip:
         if random.random() > 0.5:
             mask = TF.hflip(mask)
         return image, mask
+
+class CustomGaussianNoise:
+    def __init__(self, probability=0.5, mean=0.0, std=1.0):
+        self.probability = probability
+        self.mean = mean
+        self.std = std
+
+    def __call__(self, image, mask):
+        seed = random.randint(0,2**32)
+        random.seed(seed)
+        if random.random() < self.probability:
+            image = self.add_gaussian_noise(image)
+        return image, mask
+
+    def add_gaussian_noise(self, image):
+        np_image = np.array(image)
+        noise = np.random.normal(self.mean, self.std, np_image.shape)
+        np_noisy_image = np_image + noise
+        np_noisy_image = np.clip(np_noisy_image, 0, 255).astype(np.uint8)
+        return TF.to_pil_image(np_noisy_image)
     
 class CustomDataset(data.Dataset):
     """CRKWH1000 CRACKLS315 STONE331_"""
@@ -68,7 +89,7 @@ class CustomDataset(data.Dataset):
             raise FileNotFoundError(f"Files not found in {mask_dir}")
         
         self.aug = CustomHorizontalFlip()
-        
+        self.aug2 = CustomGaussianNoise()
         self.transforms = T.Compose([
             T.ToTensor(),
         ])
@@ -95,6 +116,7 @@ class CustomDataset(data.Dataset):
         assert image.size == mask.size, f"`image`: {image.size} and `mask`: {mask.size} are not the same"
 
         image , mask = self.aug(image , mask)
+        image , mask = self.aug2(image , mask)
         
         if self.transforms is not None:
             image = self.transforms(image)
