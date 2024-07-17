@@ -12,18 +12,16 @@ from crackseg.models.resuidual_unet import ResUNet
 from crackseg.models import UNet
 from crackseg.utils.dataset import RoadCrack,CustomDataset
 from crackseg.utils.general import random_seed
-from crackseg.utils.losses import CrossEntropyLoss, DiceCELoss, DiceLoss, FocalLoss
+from custom_loss import CustomCrossEntropy , BCEDiceLoss , FocalLoss
 import cv2
 import numpy as np
 
 from torchmetrics.classification import BinaryF1Score
 from torchmetrics.classification import BinaryPrecision , BinaryRecall
 from torchmetrics.classification import BinaryJaccardIndex
-import torchmetrics
-
-from sklearn.metrics import precision_score, recall_score, f1_score
 from sklearn.metrics import average_precision_score
-import math
+
+
 def get_ap(output,target):
     output = torch.sigmoid(output)
     
@@ -34,27 +32,6 @@ def get_ap(output,target):
 
     print("Ap score : {:.5f}%".format(ap_score*100))
 
-
-
-def get_metrics(output,target,th,flag=False):
-    output = torch.sigmoid(output)
-    
-    output = (output > th).float()
-    
-    TP = (output * target).sum().item()
-    FP = (output * (1-target)).sum().item()
-    FN = ((1-output) * target).sum().item()
-    
-    precision = TP / (TP + FP + 1e-7)
-    recall = TP / (TP + FN + 1e-7)
-    
-    f1_score = 2 * (precision * recall) / (precision + recall + 1e-7)
-    
-    if flag:
-        print("임계점 : ",th)
-        print("정밀도 : {:.5f}% 재현율 : {:.5f}% f1_score : {:.5f}%".format(precision*100,recall*100,f1_score*100))
-    
-    return f1_score
 
 def find_best_threshold(outputs, targets):
     thresholds = np.arange(0, 1.01, 0.01)
@@ -71,21 +48,66 @@ def find_best_threshold(outputs, targets):
     print("best thresholds : ",best_thresholds)
 
     return best_thresholds
+
  
+def get_metrics(out_list,th=0.5,flag=False):
+    
+    precision_list = []
+    recall_list = []
+    f1_score_list = []
+    
+    for output,target in out_list:
+        output = torch.sigmoid(output)
+        
+        output = (output > th).float()
+        
+        TP = (output * target).sum().item()
+        FP = (output * (1-target)).sum().item()
+        FN = ((1-output) * target).sum().item()
+        
+        precision = TP / (TP + FP + 1e-7)
+        recall = TP / (TP + FN + 1e-7)
+        f1_score = 2 * (precision * recall) / (precision + recall + 1e-7)
+        
+        precision_list.append(precision)
+        recall_list.append(recall)
+        f1_score_list.append(f1_score)
+
+        p = sum(precision_list) / len(precision_list)
+        r = sum(recall_list) / len(recall_list)
+        f = sum(f1_score) / len(f1_score)
+        
+    print (f"임계점 : {th:.5f } ------> 정밀도평균  : {p:.5f} 재현율평균 : {r:.5f} f1 score평균 : {f:.5f}")
+    
+    return th , f
+
 
 @torch.inference_mode
 def evaulte(model , data_loader,device):
     model.eval()
     loss_list = []
-    criterion = torch.nn.BCEWithLogitsLoss()
+    out_list = []
+    criterion = BCEDiceLoss()
     for image , target  in tqdm(data_loader , total=len(data_loader)):
         image , target = image.to(device) , target.to(device)
         with torch.no_grad():
             output = model(image)
             loss = criterion(output,target)
+            out_list.append(output,target)
             loss_list.append(loss.item())
     
+    it_range = np.arange(0.1 , 1.01 , 0.1)
+    best_th = 0.0
+    best_f = 0.0
+    for th in it_range:
+        th_res , f = get_metrics(out_list)   
+        if f > best_f:
+            print(f"Threshold :  {th_res:.2f} update best f1 score ------> ",f)
+            best_f = f 
+            best_th = th_res
+                     
     return sum(loss_list) / len(loss_list)
+
 
 @torch.inference_mode
 def image_segmentation_runnung(model , input , device):
@@ -107,8 +129,9 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logging.info(f"Device: {device}")
     model = ResUNet(in_channels=3, out_channels=1)
-    weith_path = 'weights/CRKWH100/custom_cross/best.pt'
-    ckpt = torch.load(weith_path,map_location=device)
+    weight_path = 'weights/CRKWH100/dice_only/best.pt'
+    #weight_path = 'weights/CrackLS315/custom_cross/best.pt'
+    ckpt = torch.load(weight_path,map_location=device)
     model.load_state_dict(ckpt['model'].float().state_dict())
     model = model.to(device)
     
@@ -118,9 +141,11 @@ if __name__ == "__main__":
         f"\t{model.out_channels} output channels (number of classes)"
     )
     
+
     image_path = 'data/CRKWH100_IMAGE/test'
     mask_path = 'data/CRKWH100_MASK/test'
-    test_dataset = CustomDataset(image_path,mask_path,'png',is_resize=True)
+    image_type = 'png'
+    test_dataset = CustomDataset(image_path,mask_path,image_type,is_resize=True)
     test_loader = DataLoader(test_dataset,batch_size=1,num_workers=8,shuffle=False,pin_memory=True)
     
     for index , i in enumerate(test_loader):
@@ -133,8 +158,8 @@ if __name__ == "__main__":
             label__ = t[1]
             break
     
-    #loss = evaulte(model,test_loader,device)
-    #print("Test Dataset loss :{:.5f}".format(loss))
+    loss = evaulte(model,test_loader,device)
+    print("Test Dataset loss :{:.5f}".format(loss))
     
     target =  image__.squeeze(0).permute(1,2,0).detach().cpu().numpy()
     mask = label__.squeeze(0).permute(1,2,0).detach().cpu().numpy()

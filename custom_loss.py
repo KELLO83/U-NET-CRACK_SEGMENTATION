@@ -10,16 +10,13 @@ class CustomCrossEntropy(nn.Module):
         self.epsilon = 1e-12
         
     def forward(self, inputs, target):
-        # Apply sigmoid to the inputs to get probabilities
+
         inputs = torch.sigmoid(inputs)
-        
-        # Clamp values to avoid log(0)
+
         inputs = torch.clamp(inputs, self.epsilon, 1 - self.epsilon)
 
-        # Compute binary cross entropy loss
         loss = -(target * torch.log(inputs) + (1 - target) * torch.log(1 - inputs))
-        
-        # Return mean loss
+
         return loss.mean()
 
 class BCEDiceLoss(nn.Module):

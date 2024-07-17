@@ -86,8 +86,8 @@ def train(opt, model, device):
     #weight_rate = torch.tensor([0.9]).to(device)
     #criterion = nn.BCEWithLogitsLoss(pos_weight=weight_rate).to(device)
     # criterion = FocalLoss()
-    #criterion = BCEDiceLoss()
-    criterion =CustomCrossEntropy()
+    criterion = BCEDiceLoss()
+    #criterion =CustomCrossEntropy()
     writer = SummaryWriter('./log_dir')
     
     # Resume
@@ -106,7 +106,7 @@ def train(opt, model, device):
     print(f"opt.data {opt.data}")
     
     
-    #dataset
+    # #dataset
     # image_path = 'data/CRKWH100_IMAGE'
     # mask_path = 'data/CRKWH100_MASK'
     # image_type = 'png'
@@ -191,8 +191,8 @@ def validate(model, data_loader, device):
     model.eval()
     #criterion = torch.nn.BCEWithLogitsLoss()
     #criterion = FocalLoss()
-    #criterion = BCEDiceLoss()
-    criterion =CustomCrossEntropy()
+    criterion = BCEDiceLoss()
+    #criterion =CustomCrossEntropy()
     for image, target in tqdm(data_loader, total=len(data_loader)):
         image, target = image.to(device), target.to(device)
         with torch.no_grad():
@@ -206,7 +206,7 @@ def parse_opt():
     parser = argparse.ArgumentParser(description="Crack Segmentation training arguments")
     parser.add_argument("--data", type=str, default="./data", help="Path to root folder of data")
     parser.add_argument("--image_size", type=int, default=512, help="Input image size, default: 6") # 512 수정
-    parser.add_argument("--save-dir", type=str, default="weights/CrackLS315/custom_cross", help="Directory to save weights")
+    parser.add_argument("--save-dir", type=str, default="weights/CrackLS315/bcedice", help="Directory to save weights")
     parser.add_argument("--epochs", type=int, default=50, help="Number of epochs, default: 50")
     parser.add_argument("--batch-size", type=int, default=2, help="Batch size, default: 12")
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate, default: 1e-5")

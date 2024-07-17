@@ -25,6 +25,7 @@ import natsort
 from torchvision import transforms as T
 import random
 import torchvision.transforms.functional as TF
+import torch.nn.functional as F
 from torchvision import transforms
 
 class CustomHorizontalFlip:
@@ -68,6 +69,7 @@ class CustomDataset(data.Dataset):
             image_size: int = 512,
             transforms= None,
             is_resize : bool = False,
+            is_stone : bool = False,
     ) -> None:
         
         self.image_dir = image_dir
@@ -81,7 +83,12 @@ class CustomDataset(data.Dataset):
         
         self.image_filenames = natsort.natsorted(self.image_filenames)
         self.mask_filenames  =natsort.natsorted(self.mask_filenames)
-                
+        
+        if is_stone : 
+            self.is_stone = True
+        else:
+            self.is_stone = False
+            
         if not self.image_filenames:
             raise FileNotFoundError(f"Files not found in {image_dir}")
         
@@ -118,6 +125,9 @@ class CustomDataset(data.Dataset):
         image , mask = self.aug(image , mask)
         image , mask = self.aug2(image , mask)
         
+        if self.is_stone:
+            mask = F.interpolate(mask , size=(512,512),mode='nearest')
+            
         if self.transforms is not None:
             image = self.transforms(image)
             mask = self.transforms(mask)
