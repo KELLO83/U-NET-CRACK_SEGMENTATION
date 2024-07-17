@@ -6,6 +6,8 @@ logs
 .idea
 .vscode
 /data
+/log_dir 
+/weights
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

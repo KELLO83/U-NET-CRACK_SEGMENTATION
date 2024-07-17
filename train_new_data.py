@@ -69,29 +69,26 @@ def train(opt, model, device):
     best, last = f"{opt.save_dir}/best.pt", f"{opt.save_dir}/last.pt"
 
     # Check pretrained weights
+   
     pretrained = opt.weights.endswith(".pt")
+
     if pretrained:
         ckpt = torch.load(opt.weights, map_location=device)
         model.load_state_dict(ckpt["model"].float().state_dict())
         logging.info(f"Model ckpt loaded from {opt.weights}")
     model.to(device)
-    
 
     # Optimizers & LR Scheduler & Mixed Precision & Loss
-    optimizer = torch.optim.Adam(model.parameters(), lr=opt.lr, weight_decay=1e-8,foreach=True)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", patience=5,verbose=True,min_lr=1e-5
+    optimizer = torch.optim.Adam(model.parameters(), lr=opt.lr, weight_decay=1e-3,foreach=True)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", patience=10,verbose=True,min_lr=1e-12
                                                            ,factor=0.1)
     grad_scaler = torch.cuda.amp.GradScaler(enabled=opt.amp)
-    #criterion = torch.nn.BCEWithLogitsLoss()
-    #weight_rate = torch.tensor([0.9]).to(device)
-    #criterion = nn.BCEWithLogitsLoss(pos_weight=weight_rate).to(device)
-    # criterion = FocalLoss()
     criterion = BCEDiceLoss()
-    #criterion =CustomCrossEntropy()
     writer = SummaryWriter('./log_dir')
     
     # Resume
     if pretrained:
+        print("======================pretrained=======================")
         if ckpt["optimizer"] is not None:
             start_epoch = ckpt["epoch"] + 1
             best_loss = ckpt["best_loss"]
@@ -103,8 +100,6 @@ def train(opt, model, device):
                 )
         del ckpt
     
-    print(f"opt.data {opt.data}")
-    
     
     # #dataset
     # image_path = 'data/CRKWH100_IMAGE'
@@ -114,23 +109,33 @@ def train(opt, model, device):
     # test_image__path = 'data/CRKWH100_IMAGE/val'
     # test_mask_path = 'data/CRKWH100_MASK/val'
     
-    image_path = 'data/CrackLS315_IMAGE'
-    mask_path = 'data/CrackLS315_MASK'
+    image_path = 'data/Stone331_IMAGE'
+    mask_path = 'data/Stone331_MASK'
     image_type = 'jpg'
     
-    test_image__path = 'data/CrackLS315_IMAGE/test'
-    test_mask_path = 'data/CrackLS315_MASK/test'
-    train_data = CustomDataset(image_path , mask_path , image_type , is_resize=False)
-    test_data = CustomDataset(test_image__path,test_mask_path,image_type,is_resize=False)
+    test_image_path = 'data/Stone331_IMAGE/val'
+    test_mask_path = 'data/Stone331_MASK/val'
+    
+    train_data = CustomDataset(image_path , mask_path , image_type , is_resize=False,is_stone=True)
+    test_data = CustomDataset(test_image_path,test_mask_path,image_type,is_resize=False,is_stone=True)
     
     it_test = iter(train_data)
-    it_naxt = it_test.__next__()
-    it_mask = it_naxt[1]
+    it_next = it_test.__next__()
+    it_mask = it_next[1]
     
     #DataLoader
     train_loader = DataLoader(train_data, batch_size=opt.batch_size, num_workers=8, shuffle=True, pin_memory=True) # batch_size = opt.batch_size
     test_loader = DataLoader(test_data,batch_size=1,num_workers=8,shuffle=False, pin_memory=True)
-    
+        
+    # count = 0    
+    # for i in train_loader:
+    #     batch = i
+    #     image = batch[0]
+    #     mask = batch[1]
+    #     visualize_batch_cv2(image , mask)
+    #     count += 1
+    #     break
+ 
     best_loss = 100
     scalar_count = 0
     val_count = 0
@@ -162,6 +167,7 @@ def train(opt, model, device):
         loss = validate(model, test_loader, device)
         logging.info(f"VALIDATION: Loss: {loss:.4f}")
         scheduler.step(loss)
+        print(f"{scheduler.get_last_lr()[0]:.2e}")
         writer.add_scalar("loss/val",loss.item(),val_count)
         val_count += 1
         ckpt = {
@@ -206,11 +212,11 @@ def parse_opt():
     parser = argparse.ArgumentParser(description="Crack Segmentation training arguments")
     parser.add_argument("--data", type=str, default="./data", help="Path to root folder of data")
     parser.add_argument("--image_size", type=int, default=512, help="Input image size, default: 6") # 512 수정
-    parser.add_argument("--save-dir", type=str, default="weights/CrackLS315/bcedice", help="Directory to save weights")
-    parser.add_argument("--epochs", type=int, default=50, help="Number of epochs, default: 50")
-    parser.add_argument("--batch-size", type=int, default=2, help="Batch size, default: 12")
-    parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate, default: 1e-5")
-    parser.add_argument("--weights", type=str, default="", help="Pretrained model, default: None")
+    parser.add_argument("--save-dir", type=str, default="weights/stone/bcedice", help="Directory to save weights")
+    parser.add_argument("--epochs", type=int, default=100, help="Number of epochs, default: 50")
+    parser.add_argument("--batch-size", type=int, default=8, help="Batch size, default: 12")
+    parser.add_argument("--lr", type=float, default=1e-8, help="Learning rate, default: 1e-5")
+    parser.add_argument("--weights", type=str, default='weights/stone/bcedice/best.pt', help="Pretrained model, default: None")
     parser.add_argument("--amp", action="store_true", help="Use mixed precision")
     parser.add_argument("--num-classes", type=int, default=1, help="Number of classes")
 

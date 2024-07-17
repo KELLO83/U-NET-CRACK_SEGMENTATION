@@ -16,9 +16,6 @@ from custom_loss import CustomCrossEntropy , BCEDiceLoss , FocalLoss
 import cv2
 import numpy as np
 
-from torchmetrics.classification import BinaryF1Score
-from torchmetrics.classification import BinaryPrecision , BinaryRecall
-from torchmetrics.classification import BinaryJaccardIndex
 from sklearn.metrics import average_precision_score
 
 
@@ -73,13 +70,11 @@ def get_metrics(out_list,th=0.5,flag=False):
         recall_list.append(recall)
         f1_score_list.append(f1_score)
 
-        p = sum(precision_list) / len(precision_list)
-        r = sum(recall_list) / len(recall_list)
-        f = sum(f1_score) / len(f1_score)
-        
-    print (f"임계점 : {th:.5f } ------> 정밀도평균  : {p:.5f} 재현율평균 : {r:.5f} f1 score평균 : {f:.5f}")
-    
-    return th , f
+    p = sum(precision_list) / len(precision_list)
+    r = sum(recall_list) / len(recall_list)
+    f = sum(f1_score_list) / len(f1_score_list)
+    #print(f"임계점 : {th} ------> 정밀도평균 : {p:.5f} 재현율평균 : {r:.5f} f1 score평균 : {f:.5f}")
+    return th , p , r , f
 
 
 @torch.inference_mode
@@ -93,44 +88,55 @@ def evaulte(model , data_loader,device):
         with torch.no_grad():
             output = model(image)
             loss = criterion(output,target)
-            out_list.append(output,target)
+            out_list.append((output,target))
             loss_list.append(loss.item())
     
-    it_range = np.arange(0.1 , 1.01 , 0.1)
+    it_range = np.arange(0.1 , 1.01 , 0.01)
     best_th = 0.0
     best_f = 0.0
-    for th in it_range:
-        th_res , f = get_metrics(out_list)   
+    best_p = 0.0
+    best_r = 0.0
+    for th in tqdm(it_range):
+        th_res , p , r , f= get_metrics(out_list,th)   
         if f > best_f:
-            print(f"Threshold :  {th_res:.2f} update best f1 score ------> ",f)
+            print(f"Threshold :  {th_res:.2f} update best f1 score ------> {f:.2f}")
             best_f = f 
             best_th = th_res
-                     
-    return sum(loss_list) / len(loss_list)
+            best_p = p
+            best_r = r
+    print(f"END Best Threshold : {best_th:.2f} precision : {best_p:.2f} recall : {best_r:.2f} f1 score : {best_f:.2f}")
+    return best_th , sum(loss_list) / len(loss_list)
 
 
 @torch.inference_mode
-def image_segmentation_runnung(model , input , device):
+def image_segmentation_runnung(model , input , device , th):
     model.eval()
     criterion = torch.nn.BCEWithLogitsLoss()
     with torch.no_grad():
         image,mask = input[0].to(device) , input[1].to(device)
         output = model(image)
         loss = criterion(output , mask)
-        th  = find_best_threshold(output , mask)
         get_ap(output,mask)
-        get_metrics(output,mask,th,flag=True)
         
     return output , loss , th
 
+def parse_opt():
+    parser = argparse.ArgumentParser(description="Inferece test Dataset for CRKW100 CRACKLS315 STONE331")
+    parser.add_argument("--weight_path" ,type=str , default='weights/CRKWH100/focal/best.pt' , help='Input model weight path')
+    parser.add_argument("--image_path" , type=str , default='data/CRKWH100_IMAGE/test' , help='data/CRKWH100_IMAGE')
+    parser.add_argument('--image_type' , type=str , default='png' , help='CRKWH100 -> PNG other JPG')
+    
+    return parser.parse_args()
+
 
 if __name__ == "__main__":
+    opt = parse_opt()
+    
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logging.info(f"Device: {device}")
     model = ResUNet(in_channels=3, out_channels=1)
-    weight_path = 'weights/CRKWH100/dice_only/best.pt'
-    #weight_path = 'weights/CrackLS315/custom_cross/best.pt'
+    weight_path = opt.weight_path
     ckpt = torch.load(weight_path,map_location=device)
     model.load_state_dict(ckpt['model'].float().state_dict())
     model = model.to(device)
@@ -142,9 +148,17 @@ if __name__ == "__main__":
     )
     
 
-    image_path = 'data/CRKWH100_IMAGE/test'
-    mask_path = 'data/CRKWH100_MASK/test'
-    image_type = 'png'
+    image_path = opt.image_path
+    
+    parts = image_path.split('/')
+    target = parts[1]
+    mask_target = target.split('_')[0] + '_MASK'
+
+    res = f"{parts[0]}/{mask_target}/{parts[2]}"
+    mask_path = res
+    
+    image_type = opt.image_type
+    
     test_dataset = CustomDataset(image_path,mask_path,image_type,is_resize=True)
     test_loader = DataLoader(test_dataset,batch_size=1,num_workers=8,shuffle=False,pin_memory=True)
     
@@ -152,13 +166,13 @@ if __name__ == "__main__":
         batch = i
         print(batch[0].shape)
         print(batch[1].shape)
-        if index == 4:
+        if index == 9:
             t = i
             image__ = t[0]
             label__ = t[1]
             break
     
-    loss = evaulte(model,test_loader,device)
+    best_th , loss = evaulte(model,test_loader,device)
     print("Test Dataset loss :{:.5f}".format(loss))
     
     target =  image__.squeeze(0).permute(1,2,0).detach().cpu().numpy()
@@ -168,10 +182,10 @@ if __name__ == "__main__":
 
     
     example = [image__ , label__]
-    out_image , out_loss , th =  image_segmentation_runnung(model , example , device )
+    out_image , out_loss , th =  image_segmentation_runnung(model , example , device ,best_th)
     out_image = torch.sigmoid(out_image)
     print(f"out image loss : {out_loss:.3f}")
-    print(f"Image range min : {torch.min(out_image):.5f} max : {torch.max(out_image):.5f}")
+    print(f"Image probabilityDistribution min : {torch.min(out_image):.5f} max : {torch.max(out_image):.5f}")
     out_image = (out_image > th).float() * 255
     out_image = out_image.to(torch.uint8)
     out_image = out_image.squeeze(0).permute(1,2,0).detach().cpu().numpy()

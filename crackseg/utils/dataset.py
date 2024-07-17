@@ -3,6 +3,8 @@ import cv2
 import numpy as np
 from PIL import Image
 from torch.utils import data
+import torch.utils
+import torch.utils.data
 
 from crackseg.utils.general import TrainTransforms
 from image_pad import PadToSquare
@@ -40,14 +42,12 @@ class CustomHorizontalFlip:
         return image, mask
 
 class CustomGaussianNoise:
-    def __init__(self, probability=0.5, mean=0.0, std=1.0):
+    def __init__(self, probability=0.3, mean=0.0, std=5.0):
         self.probability = probability
         self.mean = mean
         self.std = std
 
     def __call__(self, image, mask):
-        seed = random.randint(0,2**32)
-        random.seed(seed)
         if random.random() < self.probability:
             image = self.add_gaussian_noise(image)
         return image, mask
@@ -59,79 +59,64 @@ class CustomGaussianNoise:
         np_noisy_image = np.clip(np_noisy_image, 0, 255).astype(np.uint8)
         return TF.to_pil_image(np_noisy_image)
     
-class CustomDataset(data.Dataset):
+class CustomDataset(torch.utils.data.Dataset):
     """CRKWH1000 CRACKLS315 STONE331_"""
-    def __init__(
-            self,
-            image_dir: str,
-            mask_dir : str,
-            image_type : str,
-            image_size: int = 512,
-            transforms= None,
-            is_resize : bool = False,
-            is_stone : bool = False,
-    ) -> None:
-        
+    
+    def __init__(self, image_dir: str, mask_dir: str, image_type: str, image_size: int = 512, is_resize: bool = False, is_stone: bool = False) -> None:
         self.image_dir = image_dir
-        self.image_size = image_size
         self.mask_dir = mask_dir
         self.image_type = image_type
+        self.image_size = image_size
         self.is_resize = is_resize
+        self.is_stone = is_stone
+        self.to_tensor = T.Compose([
+            T.ToTensor()
+        ])
         
-        self.image_filenames = [os.path.splitext(filename)[0] for filename in os.listdir(os.path.join(self.image_dir)) if filename.endswith(f"{image_type}")]
-        self.mask_filenames = [os.path.splitext(filename)[0] for filename in os.listdir(os.path.join(self.mask_dir)) if filename.endswith(".bmp")]
+        self.image_filenames = self._load_filenames(image_dir, image_type)
+        self.mask_filenames = self._load_filenames(mask_dir, ".bmp")
         
-        self.image_filenames = natsort.natsorted(self.image_filenames)
-        self.mask_filenames  =natsort.natsorted(self.mask_filenames)
+        self.aug = CustomHorizontalFlip()
+        self.aug2 = CustomGaussianNoise()
         
-        if is_stone : 
-            self.is_stone = True
-        else:
-            self.is_stone = False
-            
         if not self.image_filenames:
             raise FileNotFoundError(f"Files not found in {image_dir}")
         
         if not self.mask_filenames:
             raise FileNotFoundError(f"Files not found in {mask_dir}")
-        
-        self.aug = CustomHorizontalFlip()
-        self.aug2 = CustomGaussianNoise()
-        self.transforms = T.Compose([
-            T.ToTensor(),
-        ])
-        
 
-        
-    def __len__(self) -> int: 
+    def _load_filenames(self, dir_path, file_extension):
+        filenames = [os.path.splitext(filename)[0] for filename in os.listdir(dir_path) if filename.endswith(file_extension)]
+        return natsort.natsorted(filenames)
+    
+    def __len__(self) -> int:
         return len(self.image_filenames)
 
     def __getitem__(self, idx):
         filename = self.image_filenames[idx]
+        image_path = os.path.join(self.image_dir, f"{filename}.{self.image_type}")
+        mask_path = os.path.join(self.mask_dir, f"{filename}.bmp")
         
-        
-        image_path = os.path.join(self.image_dir,f"{filename}.{self.image_type}")
-        mask_path = os.path.join(self.mask_dir,f"{filename}.bmp")
-        
-        # image load
         image = Image.open(image_path)
         mask = Image.open(mask_path)
-        
+
         if image is None or mask is None:
-            raise FileNotFoundError("Exception FIle not Founded")
+            raise FileNotFoundError("Exception: File not Found")
 
-        assert image.size == mask.size, f"`image`: {image.size} and `mask`: {mask.size} are not the same"
-
-        image , mask = self.aug(image , mask)
-        image , mask = self.aug2(image , mask)
+        image, mask = self.aug(image, mask)
+        image, mask = self.aug2(image, mask)
         
+        image = self.to_tensor(image)
+        mask = self.to_tensor(mask)
+                        
         if self.is_stone:
-            mask = F.interpolate(mask , size=(512,512),mode='nearest')
-            
-        if self.transforms is not None:
-            image = self.transforms(image)
-            mask = self.transforms(mask)
+            image = image.unsqueeze(dim=0)
+            image = F.interpolate(image, size=(512,512), mode='nearest')
+            image = image.squeeze(dim=0)
 
+        
+        assert image.shape[1:3] == mask.shape[1:3], f"`image`: {image.shape[1:3]} and `mask`: {mask.shape[1:3]} are not the same"
+        
         return image, mask
 
 
