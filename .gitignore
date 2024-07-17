@@ -8,6 +8,11 @@ logs
 /data
 /log_dir 
 /weights
+/weights
+*.png
+*.jpg
+*.pth
+*.pt
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

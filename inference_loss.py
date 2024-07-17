@@ -122,10 +122,10 @@ def image_segmentation_runnung(model , input , device , th):
 
 def parse_opt():
     parser = argparse.ArgumentParser(description="Inferece test Dataset for CRKW100 CRACKLS315 STONE331")
-    parser.add_argument("--weight_path" ,type=str , default='weights/CRKWH100/focal/best.pt' , help='Input model weight path')
+    parser.add_argument("--weight_path" ,type=str , default='weights/CRKWH100/bcedice/best.pt' , help='Input model weight path')
     parser.add_argument("--image_path" , type=str , default='data/CRKWH100_IMAGE/test' , help='data/CRKWH100_IMAGE')
     parser.add_argument('--image_type' , type=str , default='png' , help='CRKWH100 -> PNG other JPG')
-    
+    parser.add_argument('--resize' , type=bool , default=False , help="Stone dataset need true")
     return parser.parse_args()
 
 
@@ -159,7 +159,7 @@ if __name__ == "__main__":
     
     image_type = opt.image_type
     
-    test_dataset = CustomDataset(image_path,mask_path,image_type,is_resize=True)
+    test_dataset = CustomDataset(image_path,mask_path,image_type,is_stone=opt.resize)
     test_loader = DataLoader(test_dataset,batch_size=1,num_workers=8,shuffle=False,pin_memory=True)
     
     for index , i in enumerate(test_loader):

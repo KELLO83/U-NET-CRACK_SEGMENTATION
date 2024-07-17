@@ -108,16 +108,22 @@ def train(opt, model, device):
     
     # test_image__path = 'data/CRKWH100_IMAGE/val'
     # test_mask_path = 'data/CRKWH100_MASK/val'
+    # ' data/CrackTree_IMAGE ' 
+    # image_path = 'data/CRKWH100_IMAGE'
+
+    image_path = opt.data
+    t_ = image_path.split('/')[1].split('_')
+    t__ =  f"{image_path.split('/')[0]}/{t_[0]+'_MASK'}"
     
-    image_path = 'data/Stone331_IMAGE'
-    mask_path = 'data/Stone331_MASK'
+    
+    mask_path = t__
     image_type = 'jpg'
     
-    test_image_path = 'data/Stone331_IMAGE/val'
-    test_mask_path = 'data/Stone331_MASK/val'
+    test_image_path = os.path.join(opt.data + '/val')
+    test_mask_path = os.path.join(t__ + '/val')
     
-    train_data = CustomDataset(image_path , mask_path , image_type , is_resize=False,is_stone=True)
-    test_data = CustomDataset(test_image_path,test_mask_path,image_type,is_resize=False,is_stone=True)
+    train_data = CustomDataset(image_path , mask_path , image_type , is_train=True) # crackTree dataset
+    test_data = CustomDataset(test_image_path,test_mask_path,image_type,is_train=True)
     
     it_test = iter(train_data)
     it_next = it_test.__next__()
@@ -127,14 +133,14 @@ def train(opt, model, device):
     train_loader = DataLoader(train_data, batch_size=opt.batch_size, num_workers=8, shuffle=True, pin_memory=True) # batch_size = opt.batch_size
     test_loader = DataLoader(test_data,batch_size=1,num_workers=8,shuffle=False, pin_memory=True)
         
-    # count = 0    
-    # for i in train_loader:
-    #     batch = i
-    #     image = batch[0]
-    #     mask = batch[1]
-    #     visualize_batch_cv2(image , mask)
-    #     count += 1
-    #     break
+    count = 0    
+    for i in train_loader:
+        batch = i
+        image = batch[0]
+        mask = batch[1]
+        visualize_batch_cv2(image , mask)
+        count += 1
+        break
  
     best_loss = 100
     scalar_count = 0
@@ -210,13 +216,13 @@ def validate(model, data_loader, device):
 
 def parse_opt():
     parser = argparse.ArgumentParser(description="Crack Segmentation training arguments")
-    parser.add_argument("--data", type=str, default="./data", help="Path to root folder of data")
+    parser.add_argument("--data", type=str, default="data/CrackTree_IMAGE", help="Path to root folder of data")
     parser.add_argument("--image_size", type=int, default=512, help="Input image size, default: 6") # 512 수정
     parser.add_argument("--save-dir", type=str, default="weights/stone/bcedice", help="Directory to save weights")
     parser.add_argument("--epochs", type=int, default=100, help="Number of epochs, default: 50")
     parser.add_argument("--batch-size", type=int, default=8, help="Batch size, default: 12")
     parser.add_argument("--lr", type=float, default=1e-8, help="Learning rate, default: 1e-5")
-    parser.add_argument("--weights", type=str, default='weights/stone/bcedice/best.pt', help="Pretrained model, default: None")
+    parser.add_argument("--weights", type=str, default='', help="Pretrained model, default: None")
     parser.add_argument("--amp", action="store_true", help="Use mixed precision")
     parser.add_argument("--num-classes", type=int, default=1, help="Number of classes")
 

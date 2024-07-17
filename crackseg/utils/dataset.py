@@ -41,6 +41,7 @@ class CustomHorizontalFlip:
             mask = TF.hflip(mask)
         return image, mask
 
+
 class CustomGaussianNoise:
     def __init__(self, probability=0.3, mean=0.0, std=5.0):
         self.probability = probability
@@ -58,17 +59,25 @@ class CustomGaussianNoise:
         np_noisy_image = np_image + noise
         np_noisy_image = np.clip(np_noisy_image, 0, 255).astype(np.uint8)
         return TF.to_pil_image(np_noisy_image)
+
     
 class CustomDataset(torch.utils.data.Dataset):
-    """CRKWH1000 CRACKLS315 STONE331_"""
+    """CRKWH1000 CRACKLS315 STONE331 CrackTree260"""
     
-    def __init__(self, image_dir: str, mask_dir: str, image_type: str, image_size: int = 512, is_resize: bool = False, is_stone: bool = False) -> None:
+    def __init__(self, 
+                 image_dir: str, 
+                 mask_dir: str, 
+                 image_type: str, 
+                 image_size: int = 512, 
+                 is_stone: bool = False,
+                 is_train : bool = False) -> None:
+        
         self.image_dir = image_dir
         self.mask_dir = mask_dir
         self.image_type = image_type
         self.image_size = image_size
-        self.is_resize = is_resize
         self.is_stone = is_stone
+        self.is_train = is_train #  Crack Tree 260 
         self.to_tensor = T.Compose([
             T.ToTensor()
         ])
@@ -102,7 +111,11 @@ class CustomDataset(torch.utils.data.Dataset):
 
         if image is None or mask is None:
             raise FileNotFoundError("Exception: File not Found")
-
+        
+        if self.is_train:
+            image = self.__resize_and_pad(image)
+            mask = self.__resize_and_pad(mask)
+            
         image, mask = self.aug(image, mask)
         image, mask = self.aug2(image, mask)
         
@@ -118,6 +131,29 @@ class CustomDataset(torch.utils.data.Dataset):
         assert image.shape[1:3] == mask.shape[1:3], f"`image`: {image.shape[1:3]} and `mask`: {mask.shape[1:3]} are not the same"
         
         return image, mask
+
+    def __resize_and_pad(self , image:Image , size=(512, 512)):
+        image = np.array(image)
+        
+        h, w = image.shape[:2]
+        scale = size[0] / max(h, w)
+        
+        new_w = int(w * scale)
+        new_h = int(h * scale)
+        resized_image = cv2.resize(image, (new_w, new_h))
+        
+        delta_w = size[1] - new_w
+        delta_h = size[0] - new_h
+        top, bottom = delta_h // 2, delta_h - (delta_h // 2)
+        left, right = delta_w // 2, delta_w - (delta_w // 2)
+        
+        color = [0, 0, 0] 
+        padded_image = cv2.copyMakeBorder(resized_image, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)
+        print("resize image :",padded_image.shape)
+        
+        image = Image.fromarray(padded_image)
+        return padded_image
+
 
 
 def to_binary(mask_image):

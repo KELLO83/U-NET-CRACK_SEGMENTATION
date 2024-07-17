@@ -97,4 +97,4 @@ class ResUNet(nn.Module):
     
 if __name__ == "__main__":
     model = ResUNet(in_channels=3,out_channels=1)
-    torchinfo.summary(model , input_size=(1,3,512,512))
+    torchinfo.summary(model , input_size=(8,3,960,720))
