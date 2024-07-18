@@ -9,6 +9,7 @@ import torch.nn.functional as F
 import torch.nn as nn 
 from torch.utils.data import DataLoader
 from crackseg.models.resuidual_unet import ResUNet
+from crackseg.models.attention_resunet import AttentionResUNet
 from torch.utils.tensorboard import SummaryWriter
 
 from crackseg.models import UNet
@@ -37,6 +38,8 @@ def visualize_batch_cv2(images, masks):
         mask = masks[i].squeeze(0).cpu().numpy()  # [1, H, W] -> [H, W]
         mask = (mask * 255).astype(np.uint8)  # 마스크 값을 0-255 범위로 변환
         
+        print("image shape " ,image.shape)
+        print("mask shape " ,mask.shape)
         # OpenCV를 사용하여 이미지와 마스크 표시
         image_named = "image"
         mask_named = "mask"
@@ -46,7 +49,7 @@ def visualize_batch_cv2(images, masks):
         cv2.moveWindow(mask_named,1500,1000)        
         cv2.imshow(image_named, image)
         cv2.imshow(mask_named, mask)
-        cv2.waitKey(1000)  # 키 입력을 대기 (무한 대기)
+        cv2.waitKey()  #
         cv2.destroyAllWindows()
     
         
@@ -80,10 +83,11 @@ def train(opt, model, device):
 
     # Optimizers & LR Scheduler & Mixed Precision & Loss
     optimizer = torch.optim.Adam(model.parameters(), lr=opt.lr, weight_decay=1e-3,foreach=True)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", patience=10,verbose=True,min_lr=1e-12
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", patience=15,verbose=True,min_lr=1e-6
                                                            ,factor=0.1)
     grad_scaler = torch.cuda.amp.GradScaler(enabled=opt.amp)
     criterion = BCEDiceLoss()
+    #criterion = FocalLoss()
     writer = SummaryWriter('./log_dir')
     
     # Resume
@@ -100,17 +104,6 @@ def train(opt, model, device):
                 )
         del ckpt
     
-    
-    # #dataset
-    # image_path = 'data/CRKWH100_IMAGE'
-    # mask_path = 'data/CRKWH100_MASK'
-    # image_type = 'png'
-    
-    # test_image__path = 'data/CRKWH100_IMAGE/val'
-    # test_mask_path = 'data/CRKWH100_MASK/val'
-    # ' data/CrackTree_IMAGE ' 
-    # image_path = 'data/CRKWH100_IMAGE'
-
     image_path = opt.data
     t_ = image_path.split('/')[1].split('_')
     t__ =  f"{image_path.split('/')[0]}/{t_[0]+'_MASK'}"
@@ -127,20 +120,23 @@ def train(opt, model, device):
     
     it_test = iter(train_data)
     it_next = it_test.__next__()
+    it_image = it_next[0]
     it_mask = it_next[1]
-    
+
     #DataLoader
     train_loader = DataLoader(train_data, batch_size=opt.batch_size, num_workers=8, shuffle=True, pin_memory=True) # batch_size = opt.batch_size
-    test_loader = DataLoader(test_data,batch_size=1,num_workers=8,shuffle=False, pin_memory=True)
+    test_loader = DataLoader(test_data,batch_size=opt.batch_size,num_workers=8,shuffle=False, pin_memory=True)
         
-    count = 0    
-    for i in train_loader:
-        batch = i
-        image = batch[0]
-        mask = batch[1]
-        visualize_batch_cv2(image , mask)
-        count += 1
-        break
+    # count = 0    
+    # for i in train_loader:
+    #     batch = i
+    #     image = batch[0]
+    #     mask = batch[1]
+    #     print("image shape : ",image.shape)
+    #     print("mask shape : ",mask.shape)
+    #     visualize_batch_cv2(image , mask)
+    #     count += 1
+    #     break
  
     best_loss = 100
     scalar_count = 0
@@ -218,10 +214,10 @@ def parse_opt():
     parser = argparse.ArgumentParser(description="Crack Segmentation training arguments")
     parser.add_argument("--data", type=str, default="data/CrackTree_IMAGE", help="Path to root folder of data")
     parser.add_argument("--image_size", type=int, default=512, help="Input image size, default: 6") # 512 수정
-    parser.add_argument("--save-dir", type=str, default="weights/stone/bcedice", help="Directory to save weights")
+    parser.add_argument("--save-dir", type=str, default="weights/crackTree/AttentionRes/bcedice", help="Directory to save weights")
     parser.add_argument("--epochs", type=int, default=100, help="Number of epochs, default: 50")
-    parser.add_argument("--batch-size", type=int, default=8, help="Batch size, default: 12")
-    parser.add_argument("--lr", type=float, default=1e-8, help="Learning rate, default: 1e-5")
+    parser.add_argument("--batch-size", type=int, default=4, help="Batch size, default: 12")
+    parser.add_argument("--lr", type=float, default=1e-2, help="Learning rate, default: 1e-5")
     parser.add_argument("--weights", type=str, default='', help="Pretrained model, default: None")
     parser.add_argument("--amp", action="store_true", help="Use mixed precision")
     parser.add_argument("--num-classes", type=int, default=1, help="Number of classes")
@@ -233,7 +229,7 @@ def main(opt):
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logging.info(f"Device: {device}")
-    model = ResUNet(in_channels=3, out_channels=opt.num_classes)
+    model = AttentionResUNet(in_channels=3, out_channels=opt.num_classes)
     torchinfo.summary(model,input_size=(1,3,opt.image_size,opt.image_size))
     logging.info(
         f"Network:\n"

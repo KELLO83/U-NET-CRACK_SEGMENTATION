@@ -30,24 +30,50 @@ def get_ap(output,target):
     print("Ap score : {:.5f}%".format(ap_score*100))
 
 
-def find_best_threshold(outputs, targets):
+def find_best_threshold(outputs , target):
     thresholds = np.arange(0, 1.01, 0.01)
     best_f1 = 0.0
     best_thresholds = 0.0
     for i in thresholds:
-        f1 = get_metrics(outputs,targets,i)
-        
+        f1 = get_f1_score(outputs,i , target)
         if f1 > best_f1:
             best_f1 = f1
             best_thresholds = i
-            print("best f1 update : {:.4f} best th update : {:.4f}".format(best_f1,best_thresholds))
+            # print("best f1 update : {:.4f} best th update : {:.4f}".format(best_f1,best_thresholds))
     
-    print("best thresholds : ",best_thresholds)
+    #print("best thresholds : ",best_thresholds)
 
-    return best_thresholds
+    return best_thresholds , best_f1
 
- 
-def get_metrics(out_list,th=0.5,flag=False):
+
+def get_f1_score(outputs , th , target):
+    output = torch.sigmoid(outputs)
+    output = (output > th).float()
+    Epsilon = 1e-8
+    
+    TP = (output * target).sum().item()
+    FP = (output * (1-target)).sum().item()
+    FN = ((1-output) * target).sum().item()
+    
+    precision = TP / (TP + FP + Epsilon )
+    recall = TP / (TP + FN + Epsilon)
+    f1_score = 2 * (precision * recall) / (precision + recall + Epsilon)
+    
+    return f1_score
+    
+def get_OIS(out_list : list) :
+    f1_list = []
+    for i , (out , target) in enumerate(out_list):
+        output = torch.sigmoid(out)
+        best_th , f_ = find_best_threshold(output , target)
+        print(f"{i}-->Threshold : {best_th:.2f} f1_score : {f_:.4f}")
+        f1_list.append(f_)
+        
+    OIS_RESULT =  sum(f1_list) / len(f1_list)    
+    print(f"OIS --------->{OIS_RESULT:.3f}")
+    
+    
+def get_ODS(out_list,th=0.5,flag=False):
     
     precision_list = []
     recall_list = []
@@ -96,15 +122,15 @@ def evaulte(model , data_loader,device):
     best_f = 0.0
     best_p = 0.0
     best_r = 0.0
-    for th in tqdm(it_range):
-        th_res , p , r , f= get_metrics(out_list,th)   
+    get_OIS(out_list)
+    for th in it_range:
+        th_res , p , r , f= get_ODS(out_list,th)   
         if f > best_f:
-            print(f"Threshold :  {th_res:.2f} update best f1 score ------> {f:.2f}")
             best_f = f 
             best_th = th_res
             best_p = p
             best_r = r
-    print(f"END Best Threshold : {best_th:.2f} precision : {best_p:.2f} recall : {best_r:.2f} f1 score : {best_f:.2f}")
+    print(f"임계점 : {th_res} ------> 정밀도평균 : {best_p:.5f} 재현율평균 : {best_r:.5f} ODS(F1 score 평균) : {best_f:.5f}")
     return best_th , sum(loss_list) / len(loss_list)
 
 
@@ -122,7 +148,7 @@ def image_segmentation_runnung(model , input , device , th):
 
 def parse_opt():
     parser = argparse.ArgumentParser(description="Inferece test Dataset for CRKW100 CRACKLS315 STONE331")
-    parser.add_argument("--weight_path" ,type=str , default='weights/CRKWH100/bcedice/best.pt' , help='Input model weight path')
+    parser.add_argument("--weight_path" ,type=str , default='weights/crackTree/bcedice/best.pt' , help='Input model weight path')
     parser.add_argument("--image_path" , type=str , default='data/CRKWH100_IMAGE/test' , help='data/CRKWH100_IMAGE')
     parser.add_argument('--image_type' , type=str , default='png' , help='CRKWH100 -> PNG other JPG')
     parser.add_argument('--resize' , type=bool , default=False , help="Stone dataset need true")

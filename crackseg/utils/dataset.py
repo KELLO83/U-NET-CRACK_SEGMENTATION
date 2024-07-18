@@ -29,18 +29,57 @@ import random
 import torchvision.transforms.functional as TF
 import torch.nn.functional as F
 from torchvision import transforms
+from PIL import Image
 
 class CustomHorizontalFlip:
     def __call__(self, image, mask):
-        seed = random.randint(0, 2**32)
+        seed = random.randint(0,2**32)
         random.seed(seed)
-        if random.random() > 0.5:
-            image = TF.hflip(image)
-        random.seed(seed)
-        if random.random() > 0.5:
-            mask = TF.hflip(mask)
-        return image, mask
 
+        is_rotate = random.random() > 0.5
+        
+        if is_rotate > 0.5:
+            image = TF.hflip(image)
+            mask = TF.hflip(mask)
+    
+        return image , mask
+    
+class CustomRandomRotation:
+    def __call__(self , image , mask):
+        seed = random.randint(0,2**32)
+        
+        random.seed(seed)
+        angle = random.randint(0,90)
+        
+        is_rotate = random.random() > 0.5
+        
+        if is_rotate > 0.3:
+            image = TF.affine(image , angle=angle , translate=(0,0) , scale = 1.0 , shear=(0,0))
+            mask = TF.affine(mask , angle = angle , translate=(0,0) , scale=1.0 , shear=(0,0))
+        
+        return image , mask
+    
+class CustomVerticalFLip:
+    def __call__(self,image,mask):
+        seed = random.randint(0,2**32)
+        
+        random.seed(seed)        
+        is_rotate = random.random() > 0.5
+        
+        if is_rotate > 0.5:
+            image = TF.vflip(image)
+            mask = TF.vflip(mask)
+
+        return image ,  mask
+    
+class CustomCompose:
+    def __init__(self, transforms):
+        self.transforms = transforms
+    
+    def __call__(self, image, mask):
+        for t in self.transforms:
+            image, mask = t(image, mask)
+        return image, mask
 
 class CustomGaussianNoise:
     def __init__(self, probability=0.3, mean=0.0, std=5.0):
@@ -85,8 +124,13 @@ class CustomDataset(torch.utils.data.Dataset):
         self.image_filenames = self._load_filenames(image_dir, image_type)
         self.mask_filenames = self._load_filenames(mask_dir, ".bmp")
         
-        self.aug = CustomHorizontalFlip()
-        self.aug2 = CustomGaussianNoise()
+        # self.aug1 = CustomGaussianNoise()
+        self.aug = CustomCompose([
+            CustomGaussianNoise(),
+            CustomHorizontalFlip(),
+            CustomVerticalFLip(),
+            CustomRandomRotation(),
+        ])
         
         if not self.image_filenames:
             raise FileNotFoundError(f"Files not found in {image_dir}")
@@ -108,16 +152,16 @@ class CustomDataset(torch.utils.data.Dataset):
         
         image = Image.open(image_path)
         mask = Image.open(mask_path)
-
+    
         if image is None or mask is None:
             raise FileNotFoundError("Exception: File not Found")
         
         if self.is_train:
             image = self.__resize_and_pad(image)
             mask = self.__resize_and_pad(mask)
+            image = self.__convert_channel(image)
             
         image, mask = self.aug(image, mask)
-        image, mask = self.aug2(image, mask)
         
         image = self.to_tensor(image)
         mask = self.to_tensor(mask)
@@ -149,27 +193,20 @@ class CustomDataset(torch.utils.data.Dataset):
         
         color = [0, 0, 0] 
         padded_image = cv2.copyMakeBorder(resized_image, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)
-        print("resize image :",padded_image.shape)
+        #print("resize image :",padded_image.shape)
         
         image = Image.fromarray(padded_image)
-        return padded_image
+        return image
+    
+    def __convert_channel(self, image : Image):
+        """1 chaneel ---->>>>> 3 channel"""
+        image = np.array(image)
+        color_image = cv2.cvtColor(image,cv2.COLOR_GRAY2BGR)
+        return Image.fromarray(color_image)
 
-
-
-def to_binary(mask_image):
-    # Convert PIL Image to numpy array
-    mask_array = np.array(mask_image)
-
-    # Apply threshold directly to create a binary image with values 0 and 255
-    _, binary_mask = cv2.threshold(mask_array, 127, 255, cv2.THRESH_BINARY)
-    binary_mask = binary_mask.astype(np.uint8) / 255
-
-    # Convert numpy array back to PIL Image, already in binary format
-    binary_mask = Image.fromarray(binary_mask)
-
-    return binary_mask
 
 class RoadCrack(data.Dataset):
+    """U NET OUT CHANNEL 2 CRACK500 DATASET"""
     def __init__(
             self,
             root: str,
